@@ -1,0 +1,133 @@
+//------------------------------------------------------------------------------------
+// <copyright file="CounterBasedOtpGenerator.cs" company="Stephen Jennings">
+//   Copyright 2011 Stephen Jennings. Licensed under the Apache License, Version 2.0.
+// </copyright>
+//------------------------------------------------------------------------------------
+
+namespace OathNet
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Text;
+
+    /// <summary>
+    ///     Implements the OATH HOTP algorithm.
+    /// </summary>
+    /// <example>
+    ///     <code>
+    ///         CounterBasedOtp otp = new CounterBasedOtp("01234567", 6);
+    ///         int counter = 5555;
+    ///         string expectedCode = otp.ComputeOtp(counter);
+    ///         bool validCode = userSuppliedCode == expectedCode;
+    ///     </code>
+    /// </example>
+    public class CounterBasedOtpGenerator
+    {
+        private static int[] digits = new int[]
+        { 
+            1,        // 0
+            10,       // 1
+            100,      // 2
+            1000,     // 3
+            10000,    // 4
+            100000,   // 5
+            1000000,  // 6
+            10000000, // 7
+            100000000, // 8
+			1000000000 // 9
+        };
+
+		private int binary;
+
+        private Key secretKey;
+
+        private int otpLength;
+
+        private IHMACAlgorithm hmacAlgorithm;
+
+        /// <summary>
+        ///     Initializes a new instance of the CounterBasedOtpGenerator class.
+        ///     This is used when the client and server share a counter value.
+        /// </summary>
+        /// <param name="secretKey">The secret key.</param>
+        /// <param name="otpLength">The number of digits in the OTP to generate.</param>
+        /// <param name="hmacAlgorithm">The hashing algorithm to use.</param>
+        public CounterBasedOtpGenerator(Key secretKey, int otpLength, IHMACAlgorithm hmacAlgorithm)
+        {
+            this.secretKey = secretKey;
+            this.otpLength = otpLength;
+            this.hmacAlgorithm = hmacAlgorithm;
+        }
+
+        /// <summary>
+        ///     Initializes a new instance of the CounterBasedOtpGenerator class.
+        ///     This is used when the client and server share a counter value.
+        /// </summary>
+        /// <param name="secretKey">The secret key.</param>
+        /// <param name="otpLength">The number of digits in the OTP to generate.</param>
+        public CounterBasedOtpGenerator(Key secretKey, int otpLength)
+            : this(secretKey, otpLength, new SHA1HMACAlgorithm())
+        {
+        }
+
+		int counter = 0; 
+		public string NextOtp()
+		{
+			counter++; 
+			return GenerateOtp (counter); 
+		}
+        /// <summary>
+        ///     Generates the OTP for the given <paramref name="counter"/> value.
+        ///     The client and server compute this independently and come up
+        ///     with the same result, provided they use the same shared key.
+        /// </summary>
+        /// <param name="counter">The counter value to use.</param>
+        /// <returns>The OTP for the given counter value.</returns>
+        public virtual string GenerateOtp(int counter)
+        {
+			this.counter = counter; 
+            var text = BitConverter.GetBytes(counter);
+
+            if (BitConverter.IsLittleEndian)
+            {
+                Array.Resize(ref text, 8);      // text = { 04, 03, 02, 01, 00, 00, 00, 00 }
+                Array.Reverse(text);            // text = { 00, 00, 00, 00, 01, 02, 03, 04 }
+            }
+            else
+            {
+                Array.Reverse(text);            // text = { 04, 03, 02, 01 }
+                Array.Resize(ref text, 8);      // text = { 04, 03, 02, 01, 00, 00, 00, 00 }
+                Array.Reverse(text);            // text = { 00, 00, 00, 00, 01, 02, 03, 04 }
+            }
+
+            var hash = this.hmacAlgorithm.ComputeHash(this.secretKey.Binary, text);
+
+            int offset = hash[hash.Length - 1] & 0xF;
+
+			binary = ((hash[offset] & 0x7F) << 24) |
+				((hash[offset + 1] & 0xFF) << 16) |
+				((hash[offset + 2] & 0xFF) << 8) |
+				(hash[offset + 3] & 0xFF);
+
+			//Console.WriteLine ("Binary: " + binary.ToString("X")); 
+
+			var otp = binary % CounterBasedOtpGenerator.digits[this.otpLength];
+			var result = otp.ToString("D" + this.otpLength.ToString());
+			//Console.WriteLine ("THE REAL OTP: " + result+ " and the BINARY RESULT: "+binary); 
+			return result;
+        }
+
+		public virtual string GetOpListFromBinary()
+		{
+			string res="";
+			int tmp = binary;
+			for (int i = 0; i <= 9; i++)
+			{
+				res += tmp % 8;
+				tmp /= 8;
+			}
+			return res;
+		}
+    }
+}
